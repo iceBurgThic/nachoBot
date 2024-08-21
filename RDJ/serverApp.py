@@ -15,7 +15,10 @@ from flask_limiter.util import get_remote_address
 from retrying import retry
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+config = ConfigParser()
+config.read('config.ini')
+log_level = config.get('logging', 'LOG_LEVEL', fallback='INFO')
+logging.basicConfig(level=getattr(logging, log_level.upper()))
 logger = logging.getLogger(__name__)
 
 # Flask app initialization
@@ -28,26 +31,22 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-# Load configuration from a file
-config = ConfigParser()
-config.read('config.ini')
-
 # JWT Secret Key and Algorithm
-JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', config.get('security', 'secret_key', fallback='your-secret-key'))
-JWT_ALGORITHM = 'HS256'
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', config.get('security', 'JWT_SECRET_KEY', fallback='your-secret-key'))
+JWT_ALGORITHM = config.get('security', 'JWT_ALGORITHM', fallback='HS256')
 
 # Database connection settings
-DB_HOST = config.get('database', 'host', fallback='localhost')
-DB_PORT = config.get('database', 'port', fallback='5432')
-DB_NAME = config.get('database', 'name', fallback='trading_app')
-DB_USER = config.get('database', 'user', fallback='postgres')
-DB_PASSWORD = os.getenv('DB_PASSWORD', config.get('database', 'password', fallback='password'))
+DB_HOST = config.get('database', 'HOST', fallback='localhost')
+DB_PORT = config.get('database', 'PORT', fallback='5432')
+DB_NAME = config.get('database', 'NAME', fallback='trading_app')
+DB_USER = config.get('database', 'USER', fallback='postgres')
+DB_PASSWORD = os.getenv('DB_PASSWORD', config.get('database', 'PASSWORD', fallback='password'))
 
 # Trade settings
 STOP_LOSS_PERCENTAGE = config.getfloat('trading', 'STOP_LOSS_PERCENTAGE', fallback=0.02)
 COOLDOWN_PERIOD_MINUTES = config.getint('trading', 'COOLDOWN_PERIOD_MINUTES', fallback=5)
 MAX_SIGNAL_AGE_SECONDS = config.getint('trading', 'MAX_SIGNAL_AGE_SECONDS', fallback=60)
-AVAILABLE_CAPITAL = float(os.getenv('AVAILABLE_CAPITAL', config.getfloat('trading', 'available_capital', fallback=10000)))
+AVAILABLE_CAPITAL = float(os.getenv('AVAILABLE_CAPITAL', config.getfloat('trading', 'AVAILABLE_CAPITAL', fallback=10000)))
 
 # Thread-safe lock for database access
 db_lock = threading.Lock()
@@ -141,7 +140,7 @@ def log_error(error_message, severity='ERROR'):
 def get_live_price(asset):
     """Fetch the live price of an asset from the external API."""
     try:
-        response = requests.get(f"https://api.example.com/price/{asset}")
+        response = requests.get(config.get('api', 'LIVE_PRICE_API_URL') + f"/{asset}")
         response.raise_for_status()
         data = response.json()
         return data['price']
@@ -153,7 +152,7 @@ def get_live_price(asset):
 def get_account_balance():
     """Fetch the current account balance from the external API."""
     try:
-        response = requests.get("https://api.example.com/account/balance")
+        response = requests.get(config.get('api', 'ACCOUNT_BALANCE_API_URL'))
         response.raise_for_status()
         data = response.json()
         return data['balance']
@@ -227,4 +226,4 @@ def receive_signal():
 
 if __name__ == '__main__':
     init_db()  # Initialize the database schema
-    app.run(debug=True)
+    app.run(debug=True, ssl_context=(config.get('security', 'SSL_CERT_PATH'), config.get('security', 'SSL_KEY_PATH')))
