@@ -13,6 +13,10 @@ from flask import Flask, request, jsonify, g
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from retrying import retry
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 # Setup logging
 config = ConfigParser()
@@ -47,6 +51,10 @@ STOP_LOSS_PERCENTAGE = config.getfloat('trading', 'STOP_LOSS_PERCENTAGE', fallba
 COOLDOWN_PERIOD_MINUTES = config.getint('trading', 'COOLDOWN_PERIOD_MINUTES', fallback=5)
 MAX_SIGNAL_AGE_SECONDS = config.getint('trading', 'MAX_SIGNAL_AGE_SECONDS', fallback=60)
 AVAILABLE_CAPITAL = float(os.getenv('AVAILABLE_CAPITAL', config.getfloat('trading', 'AVAILABLE_CAPITAL', fallback=10000)))
+
+# SSL Certificate paths
+SSL_CERT_PATH = config.get('security', 'SSL_CERT_PATH', fallback='/etc/ssl/certs/fullchain.pem')
+SSL_KEY_PATH = config.get('security', 'SSL_KEY_PATH', fallback='/etc/ssl/private/privkey.pem')
 
 # Thread-safe lock for database access
 db_lock = threading.Lock()
@@ -98,7 +106,7 @@ def init_db():
 # JWT Authentication decorator
 def token_required(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def token_required_func(*args, **kwargs):
         token = request.headers.get('Authorization')
         if not token:
             log_error("Missing API token.", severity='WARNING')
@@ -112,7 +120,7 @@ def token_required(f):
             log_error("Invalid API token.", severity='WARNING')
             return jsonify({"status": "error", "message": "Token is invalid!"}), 403
         return f(*args, **kwargs)
-    return decorated
+    return token_required_func
 
 def log_trade(asset, trade_type, trade_amount, price, stop_loss):
     """Log trade details into the database."""
@@ -226,4 +234,4 @@ def receive_signal():
 
 if __name__ == '__main__':
     init_db()  # Initialize the database schema
-    app.run(debug=True, ssl_context=(config.get('security', 'SSL_CERT_PATH'), config.get('security', 'SSL_KEY_PATH')))
+    app.run(debug=True, ssl_context=(SSL_CERT_PATH, SSL_KEY_PATH))
