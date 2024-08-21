@@ -1,0 +1,54 @@
+# Ignore the .env file to prevent sensitive information from being committed
+.env
+
+# Ignore Python bytecode and cache directories
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+.pyenv/
+
+# Ignore logs
+logs/
+*.log
+
+# Ignore SSL certificates and keys (if stored in the project directory)
+ssl/*.pem
+ssl/*.key
+
+# Ignore database files (if applicable)
+*.sqlite3
+*.db
+
+# Ignore Jupyter Notebook checkpoints (if used)
+.ipynb_checkpoints/
+
+# Ignore coverage reports
+htmlcov/
+.coverage
+*.cover
+*.py,cover
+
+# Ignore distribution and build directories
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Ignore IDE and editor configuration files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore Git configuration files
+.gitconfig
