@@ -13,6 +13,9 @@ ENV/
 .venv/
 .pyenv/
 
+# Ignore the FAME installation
+fame/
+
 # Ignore logs
 logs/
 *.log
