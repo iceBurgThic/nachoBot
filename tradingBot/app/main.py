@@ -14,6 +14,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from retrying import retry
 from dotenv import load_dotenv
+import hashlib
+import hmac
+import base64
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -38,6 +41,10 @@ limiter = Limiter(
 # JWT Secret Key and Algorithm
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', config.get('security', 'JWT_SECRET_KEY', fallback='your-secret-key'))
 JWT_ALGORITHM = config.get('security', 'JWT_ALGORITHM', fallback='HS256')
+
+# Kraken API credentials
+API_KEY = os.getenv('KRAKEN_API_KEY', config.get('kraken', 'API_KEY', fallback='your-api-key'))
+API_SECRET = os.getenv('KRAKEN_API_SECRET', config.get('kraken', 'API_SECRET', fallback='your-api-secret'))
 
 # Database connection settings
 DB_HOST = config.get('database', 'HOST', fallback='localhost')
@@ -144,29 +151,41 @@ def log_error(error_message, severity='ERROR'):
                 """, (error_message, severity))
                 conn.commit()
 
+def kraken_request(uri_path, data):
+    """Make a signed request to the Kraken API."""
+    url = f"https://api.kraken.com{uri_path}"
+    data['nonce'] = str(int(time.time() * 1000))
+    post_data = urllib.parse.urlencode(data)
+    message = data['nonce'] + post_data
+    message = uri_path.encode('utf-8') + hashlib.sha256(message.encode('utf-8')).digest()
+    signature = hmac.new(base64.b64decode(API_SECRET), message, hashlib.sha512)
+    headers = {
+        'API-Key': API_KEY,
+        'API-Sign': base64.b64encode(signature.digest()),
+    }
+    response = requests.post(url, headers=headers, data=post_data)
+    return response.json()
+
 @retry(stop_max_attempt_number=3, wait_fixed=2000)
 def get_live_price(asset):
-    """Fetch the live price of an asset from the external API."""
-    try:
-        response = requests.get(config.get('api', 'LIVE_PRICE_API_URL') + f"/{asset}")
-        response.raise_for_status()
-        data = response.json()
-        return data['price']
-    except requests.exceptions.RequestException as e:
-        log_error(f"Error fetching live price for {asset}: {e}", severity='CRITICAL')
+    """Fetch the live price of an asset from the Kraken API."""
+    pair = asset.upper() + "USD"
+    response = kraken_request('/0/public/Ticker', {'pair': pair})
+    if response.get('error'):
+        log_error(f"Error fetching live price for {asset}: {response['error']}", severity='CRITICAL')
         return None
+    price = float(response['result'][pair]['c'][0])
+    return price
 
 @retry(stop_max_attempt_number=3, wait_fixed=2000)
 def get_account_balance():
-    """Fetch the current account balance from the external API."""
-    try:
-        response = requests.get(config.get('api', 'ACCOUNT_BALANCE_API_URL'))
-        response.raise_for_status()
-        data = response.json()
-        return data['balance']
-    except requests.exceptions.RequestException as e:
-        log_error(f"Error fetching account balance: {e}", severity='CRITICAL')
+    """Fetch the current account balance from the Kraken API."""
+    response = kraken_request('/0/private/Balance', {})
+    if response.get('error'):
+        log_error(f"Error fetching account balance: {response['error']}", severity='CRITICAL')
         return AVAILABLE_CAPITAL  # Default to known available capital if error occurs
+    balance = float(response['result'].get('ZUSD', AVAILABLE_CAPITAL))  # Adjust to your preferred base currency
+    return balance
 
 def calculate_trade_amount(signal):
     """Calculate the amount to trade based on available capital."""
@@ -194,44 +213,20 @@ def execute_trade(signal):
     
     log_trade(asset, signal['type'], trade_amount, live_price, stop_loss_price)
 
-    # Placeholder for actual trade execution logic with the brokerage API
+    # Placeholder for actual trade execution logic with the Kraken API
+    order_type = "buy" if signal['type'] == "buy" else "sell"
+    kraken_request('/0/private/AddOrder', {
+        'pair': asset.upper() + "USD",
+        'type': order_type,
+        'ordertype': 'market',
+        'volume': trade_amount,
+        'validate': True  # Set to False to actually place the order
+    })
+
     print(f"Executing {signal['type']} trade for {asset} with amount {trade_amount} at price {live_price}.")
     print(f"Setting stop-loss at {stop_loss_price}.")
 
 def process_signal(signal):
     """Process the incoming trade signal."""
     asset = signal['asset']
-    signal_type = signal['type']  # 'buy' or 'sell'
-    
-    current_time = datetime.now()
-    signal_time = datetime.fromtimestamp(signal['timestamp'])
-
-    if (current_time - signal_time).seconds > MAX_SIGNAL_AGE_SECONDS:
-        log_error(f"Ignoring old signal for {asset}. Signal age: {current_time - signal_time} seconds.", severity='INFO')
-        return
-
-    if asset in last_signal_time:
-        last_time, last_type = last_signal_time[asset]
-        if signal_type == last_type and current_time - last_time < timedelta(minutes=COOLDOWN_PERIOD_MINUTES):
-            log_error(f"Ignoring {signal_type} signal for {asset} due to cooldown.", severity='INFO')
-            return
-
-    last_signal_time[asset] = (current_time, signal_type)
-    execute_trade(signal)
-
-@app.route('/signal', methods=['POST'])
-@limiter.limit("10 per minute")
-@token_required
-def receive_signal():
-    """API endpoint to receive and process trade signals."""
-    signal = request.json
-    if signal and 'asset' in signal and 'type' in signal and 'timestamp' in signal:
-        process_signal(signal)
-        return jsonify({"status": "success", "message": "Signal processed."}), 200
-    else:
-        log_error("Received invalid signal data.", severity='WARNING')
-        return jsonify({"status": "error", "message": "Invalid signal data."}), 400
-
-if __name__ == '__main__':
-    init_db()  # Initialize the database schema
-    app.run(debug=True, ssl_context=(SSL_CERT_PATH, SSL_KEY_PATH))
+    signal
